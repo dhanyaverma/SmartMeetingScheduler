@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Select Faculty to Edit</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-xl p-8 max-w-lg w-full">
+    <h2 class="text-3xl font-bold text-indigo-600 mb-6">Select Faculty to Edit</h2>
+    <form method="POST" action="/edit" class="space-y-4">
+      <select name="faculty" class="w-full p-2 border border-gray-300 rounded-lg">
+        {% for t in teachers %}
+          <option value="{{t}}">{{t}}</option>
+        {% endfor %}
+      </select>
+      <button type="submit" class="w-full bg-indigo-600 text-white p-3 rounded-lg hover:bg-indigo-700">Edit Timetable</button>
+    </form>
+    <form method="GET" action="/process" class="mt-4">
+      <button type="submit" class="w-full bg-green-500 text-white p-3 rounded-lg hover:bg-green-600">Done Editing - Find Slots</button>
+    </form>
+  </div>
+</body>
+</html>

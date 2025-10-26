@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Edit Timetable</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    table { width: 100%; border-collapse: collapse; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background-color: #f2f2f2; }
+  </style>
+</head>
+<body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen flex items-center justify-center p-4">
+  <div class="bg-white rounded-2xl shadow-xl p-8 max-w-4xl w-full overflow-x-auto">
+    <h2 class="text-3xl font-bold text-indigo-600 mb-6">Editing Timetable for {{faculty}}</h2>
+    <form method="POST" action="/save_edit/{{faculty}}">
+      <table id="timetable">
+        <thead>
+          <tr>
+            <th>Action (Delete)</th>
+            {% for col in columns %}
+              <th>{{col}}</th>
+            {% endfor %}
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            {% set row_idx = loop.index0 %}
+            <tr>
+              <td>
+                <input type="checkbox" name="delete_{{row_idx}}">
+                Delete
+              </td>
+              {% for col in columns %}
+                <td>
+                  {% if col in ['START TIME', 'END TIME'] %}
+                    <input type="text" name="{{col}}_{{row_idx}}" value="{{ row[col] | to_12hour }}">
+                  {% else %}
+                    <input type="text" name="{{col}}_{{row_idx}}" value="{{ row[col] | default('', true) }}">
+                  {% endif %}
+                </td>
+              {% endfor %}
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <button type="button" onclick="addRow()" class="mt-4 bg-blue-500 text-white p-2 rounded">Add New Row</button>
+      <button type="submit" class="mt-4 bg-green-500 text-white p-2 rounded">Save Changes</button>
+    </form>
+  </div>
+
+  <script>
+    var columns = {{ columns | tojson }};
+    var next_new_idx = 0;
+
+    function addRow() {
+      var tbody = document.querySelector('#timetable tbody');
+      var tr = document.createElement('tr');
+
+      // Action cell with delete checkbox
+      var td_action = document.createElement('td');
+      var input_check = document.createElement('input');
+      input_check.type = 'checkbox';
+      input_check.name = 'delete_new_' + next_new_idx;
+      td_action.appendChild(input_check);
+      td_action.appendChild(document.createTextNode(' Delete'));
+      tr.appendChild(td_action);
+
+      // Data cells
+      for (var i = 0; i < columns.length; i++) {
+        var td = document.createElement('td');
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.name = columns[i] + '_new_' + next_new_idx;
+        td.appendChild(input);
+        tr.appendChild(td);
+      }
+
+      tbody.appendChild(tr);
+      next_new_idx++;
+    }
+  </script>
+</body>
+</html>

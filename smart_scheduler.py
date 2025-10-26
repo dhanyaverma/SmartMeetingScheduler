@@ -5,6 +5,9 @@ import logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Define expected_columns at module level
+expected_columns = ["START TIME", "END TIME", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"]
+
 def time_to_minutes(t):
     if pd.isna(t):
         return None
@@ -31,7 +34,6 @@ def time_to_minutes(t):
     return None
 
 def build_busy_map(df):
-    expected_columns = ["START TIME", "END TIME", "MONDAY", "TUESDAY", "WEDNESDAY", "THURSDAY", "FRIDAY", "SATURDAY"]
     if not all(col in df.columns for col in expected_columns):
         raise ValueError(f"Excel sheet missing required columns: {expected_columns}")
     
