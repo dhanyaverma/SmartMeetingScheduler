@@ -6,15 +6,15 @@ from datetime import datetime, date
 from collections import defaultdict
 
 app = Flask(__name__)
-app.secret_key = 'super_secret_key'  # Required for sessions; change in production
+app.secret_key = 'super_secret_key'  # Change in production
 
 # Excel path
 excel_path = os.path.join(os.path.dirname(__file__), "faculty_timetable.xlsx")
 
-# Store temporary timetable changes: {(faculty, date_str): DataFrame}
+# In-memory temporary changes: {(faculty, date_str): DataFrame}
 temp_sheets = {}
 
-# Function to load/reload sheets
+# Load original timetables
 def load_sheets():
     try:
         sheets = pd.read_excel(excel_path, sheet_name=None)
@@ -27,6 +27,7 @@ def load_sheets():
 
 sheets = load_sheets()
 
+# Time formatting
 def to_hhmm(minutes):
     if minutes is None:
         return "Invalid"
@@ -41,24 +42,23 @@ def to_12hour(t):
     if pd.isna(t) or t is None or str(t).strip() == "":
         return ""
     try:
-        # Parse time string using time_to_minutes for consistency
         minutes = time_to_minutes(t)
         if minutes is None:
-            return str(t)  # Return as-is if unparseable
+            return str(t)
         return to_hhmm(minutes)
     except Exception as e:
         print(f"Error in to_12hour: {e}")
-        return str(t)  # Fallback to original string if parsing fails
+        return str(t)
 
-# Register custom Jinja2 filter
+# Register Jinja2 filter
 app.jinja_env.filters['to_12hour'] = to_12hour
-print("Registered to_12hour filter")  # Debug to confirm registration
+print("Registered to_12hour filter")
 
 def join_time(hour, minute, ampm):
     return f"{hour}:{minute} {ampm}"
 
 def clear_expired_temp_sheets():
-    """Clear temporary sheets for dates that have passed."""
+    """Remove temporary edits for past dates."""
     current_date = date.today()
     keys_to_remove = [
         key for key, df in temp_sheets.items()
@@ -69,14 +69,13 @@ def clear_expired_temp_sheets():
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-    clear_expired_temp_sheets()  # Clear expired changes on each request
-    teachers = list(sheets.keys())  # Dynamically get all sheet names as faculties
-    today = datetime.now().strftime('%Y-%m-%d')  # Pass today's date to template
+    clear_expired_temp_sheets()
+    teachers = list(sheets.keys())
+    today = datetime.now().strftime('%Y-%m-%d')
     if not teachers:
         return render_template("index.html", error="Error: Could not load faculty timetables.", teachers=[], today=today)
 
     if request.method == "POST":
-        # Store form data in session (flat=False to preserve lists)
         session['form_data'] = request.form.to_dict(flat=False)
         return render_template("edit_prompt.html")
 
@@ -94,13 +93,11 @@ def handle_edit_prompt():
 @app.route("/edit", methods=["POST"])
 def edit():
     faculty = request.form.get("faculty")
-    date_str = session['form_data']['date'][0]  # Get selected date
+    date_str = session['form_data']['date'][0]
     if faculty not in sheets:
         return "Faculty not found", 404
-    # Use temporary sheet if available for this faculty and date, else original
     df = temp_sheets.get((faculty, date_str), sheets[faculty])
-    # Replace NaN with empty strings
-    df = df.fillna('')
+    df = df.fillna('')  # Remove NaN
     columns = df.columns.tolist()
     rows = df.to_dict('records')
     return render_template("edit_timetable.html", faculty=faculty, columns=columns, rows=rows)
@@ -109,24 +106,21 @@ def edit():
 def save_edit(faculty):
     if faculty not in sheets:
         return "Faculty not found", 404
-    date_str = session['form_data']['date'][0]  # Get selected date
+    date_str = session['form_data']['date'][0]
     columns = expected_columns
     data = defaultdict(dict)
     deleted = set()
 
-    # Collect deleted indices
     for key in request.form:
         if key.startswith('delete_'):
             del_idx = key.split('_', 1)[1]
             deleted.add(del_idx)
 
-    # Collect data from form
     for key, value in request.form.items():
         if '_' in key and not key.startswith('delete_'):
             col, idx = key.rsplit('_', 1)
             data[idx][col] = value
 
-    # Build new rows
     rows = []
     for idx, row_data in data.items():
         if idx in deleted:
@@ -134,21 +128,20 @@ def save_edit(faculty):
         row = {col: row_data.get(col, '') for col in columns}
         rows.append(row)
 
-    # Store in temp_sheets instead of writing to Excel
     new_df = pd.DataFrame(rows, columns=columns)
     temp_sheets[(faculty, date_str)] = new_df
 
-    # Return to select faculty for more edits
     return render_template("select_faculty.html", teachers=session['selected_teachers'])
 
 @app.route("/process")
 def process():
-    clear_expired_temp_sheets()  # Clear expired changes
+    clear_expired_temp_sheets()
     form_data = session.get('form_data')
     if not form_data:
         return redirect(url_for("index"))
 
     result_list = []
+    alternative_slots = []
     error = None
     day_display = None
     selected_teachers = form_data['teacher']
@@ -161,18 +154,15 @@ def process():
         if duration <= 0:
             raise ValueError("Duration must be a positive number.")
 
-        # Get date and convert to weekday
+        # Parse date
         date_str = form_data['date'][0]
-        try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
-            day = date_obj.strftime('%A').upper()  # e.g., 'FRIDAY'
-            day_display = date_obj.strftime('%B %d, %Y')  # e.g., 'August 29, 2025'
-            if day == 'SUNDAY':
-                raise ValueError("No timetable available for Sundays.")
-        except ValueError as e:
-            raise ValueError(f"Invalid date: {str(e)}")
+        date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+        day = date_obj.strftime('%A').upper()
+        day_display = date_obj.strftime('%B %d, %Y')
+        if day == 'SUNDAY':
+            raise ValueError("No timetable available for Sundays.")
 
-        # Window times
+        # Parse time window
         window_start = join_time(
             form_data['window_start_hour'][0],
             form_data['window_start_minute'][0],
@@ -184,21 +174,19 @@ def process():
             form_data['window_end_ampm'][0]
         )
 
-        # Validate window
         ws_min = time_to_minutes(window_start)
         we_min = time_to_minutes(window_end)
         if ws_min is None or we_min is None or we_min <= ws_min:
             raise ValueError("Invalid time window (start must be before end).")
 
-        # Build busy maps for selected teachers
+        # Build busy maps
         busy_map = {}
         for t in selected_teachers:
-            # Use temporary sheet for this faculty and date, else original
             df = temp_sheets.get((t, date_str), sheets[t])
             busy_map[t] = build_busy_map(df)
 
-        # Search window for available slots
-        for start in range(ws_min, we_min - duration + 1, 15):  # Step by 15 min
+        # === 1. Search in preferred window ===
+        for start in range(ws_min, we_min - duration + 1, 15):
             end = start + duration
             conflict = False
             for t in selected_teachers:
@@ -211,19 +199,52 @@ def process():
             if not conflict:
                 result_list.append((start, end))
 
+        # === 2. If no slots, search extended window (±2 hours) ===
+        if not result_list:
+            EXTEND_MINUTES = 120
+            search_start = max(0, ws_min - EXTEND_MINUTES)
+            search_end = min(24*60, we_min + EXTEND_MINUTES)
+
+            candidates = []
+            for start in range(search_start, search_end - duration + 1, 15):
+                end = start + duration
+                conflict = False
+                for t in selected_teachers:
+                    for s, e in busy_map[t].get(day, []):
+                        if not (end <= s or start >= e):
+                            conflict = True
+                            break
+                    if conflict:
+                        break
+                if not conflict:
+                    center_user = (ws_min + we_min) / 2
+                    center_slot = (start + end) / 2
+                    distance = abs(center_slot - center_user)
+                    candidates.append((distance, start, end))
+
+            # Sort by closeness → pick top 5
+            candidates.sort(key=lambda x: x[0])
+            closest_5 = [(s, e) for _, s, e in candidates[:5]]
+
+            # Sort by start time for display
+            closest_5.sort(key=lambda x: x[0])
+
+            alternative_slots = closest_5
+
         # Format results
         result_list = [{"Start": to_hhmm(s), "End": to_hhmm(e)} for s, e in result_list]
+        alternative_slots = [{"Start": to_hhmm(s), "End": to_hhmm(e)} for s, e in alternative_slots]
 
     except Exception as e:
         error = f"Error processing request: {str(e)}"
 
-    # Clear session after processing
     session.pop('form_data', None)
     session.pop('selected_teachers', None)
 
     return render_template(
         "result.html",
         results=result_list,
+        alternatives=alternative_slots,
         teachers=", ".join(selected_teachers),
         day=day_display,
         error=error
